@@ -1,0 +1,4 @@
+service hall-1-0 /vendor/bin/hw/vendor.inoco.hardware.hall@1.0-service
+    class hal
+    user system
+    group system

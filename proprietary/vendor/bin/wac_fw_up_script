@@ -1,0 +1,113 @@
+#!/vendor/bin/sh
+
+TAG="WAC_FW_UP"
+FW_FILE_VERSION=252
+FW_PATH="/vendor/etc/wac_fw/WEZ01_0252.hex"
+
+install_i2c_hid() {
+    setprop vendor.wac.executed 1
+}
+
+check_need_upgrade() {
+    FW_VERSION=$(/vendor/bin/wac_flash -v | grep -o '[0-9][0-9][0-9]')
+    if [ $? -ne 0 ]; then
+        wacom_power_off
+        log -p e -t "${TAG}" "Check firmware version failed, retry..."
+        wacom_power_on
+        FW_VERSION=$(/vendor/bin/wac_flash -v | grep -o '[0-9][0-9][0-9]')
+        if [ $? -ne 0 ]; then
+            echo -n "${TAG}:FW-VER:FAILED" > /proc/bootprof
+            log -p e -t "${TAG}" "Check firmware version failed"
+            return 0
+        fi
+    fi
+    log -p i -t "${TAG}" "Firmware version: ${FW_VERSION}"
+    if [ "$FW_FILE_VERSION" -le "$FW_VERSION" ]; then
+## skip update
+        return 0
+## force update
+#        return 1
+    else
+        return 1
+    fi
+}
+
+wacom_power_on() {
+    log -p i -t "${TAG}" "Power on"
+    echo out 88 0 > /proc/mtk_gpio/soc.pinctrl
+    echo out 150 1 > /proc/mtk_gpio/soc.pinctrl
+    echo out 41 1 > /proc/mtk_gpio/soc.pinctrl
+    echo pullsel 148 1 > /proc/mtk_gpio/soc.pinctrl
+    echo pullsel 149 1 > /proc/mtk_gpio/soc.pinctrl
+    echo rsel 148 7 > /proc/mtk_gpio/soc.pinctrl
+    echo rsel 149 7 > /proc/mtk_gpio/soc.pinctrl
+    echo pullen 148 1 > /proc/mtk_gpio/soc.pinctrl
+    echo pullen 149 1 > /proc/mtk_gpio/soc.pinctrl
+    sleep 0.01s
+    echo out 88 1 > /proc/mtk_gpio/soc.pinctrl
+    sleep 0.15s
+}
+
+wacom_power_off() {
+    log -p i -t "${TAG}" "Power off"
+    echo out 88 0 > /proc/mtk_gpio/soc.pinctrl
+    echo pullen 148 0 > /proc/mtk_gpio/soc.pinctrl
+    echo pullen 149 0 > /proc/mtk_gpio/soc.pinctrl
+    echo out 150 0 > /proc/mtk_gpio/soc.pinctrl
+    echo out 41 0 > /proc/mtk_gpio/soc.pinctrl
+    sleep 0.1s
+}
+
+
+# main start
+echo -n "${TAG}:START" > /proc/bootprof
+log -p i -t "${TAG}" "Starting firmware upgrade process"
+setprop vendor.wac.update_complete 0
+setprop vendor.wac.executed 0
+
+if [ ! -e $FW_PATH ]; then
+    echo -n "${TAG}:NO FILE" > /proc/bootprof
+    log -p e -t "${TAG}" "Firmware '${FW_PATH}' not exist"
+    install_i2c_hid
+    exit 1
+fi
+
+wacom_power_on
+
+log -p i -t "${TAG}" "Target firmware version: $FW_FILE_VERSION"
+check_need_upgrade
+if [ $? -eq 0 ]; then
+    wacom_power_off
+    echo -n "${TAG}:SKIPPED" > /proc/bootprof
+    log -p i -t "${TAG}" "Firmware version is up to date, No upgrade is needed"
+    install_i2c_hid
+    setprop vendor.wac.update_complete 1
+    exit 0
+fi
+
+log -p d -t "${TAG}" "Starting to upgrade firmware..."
+/vendor/bin/wac_flash $FW_PATH
+RESULT=$?
+if [ $RESULT -ne 0 ]; then
+    wacom_power_off
+    log -p e -t "${TAG}" "Firmware upgrade failed, retry..."
+    wacom_power_on
+    log -p d -t "${TAG}" "Starting to upgrade firmware"
+    /vendor/bin/wac_flash $FW_PATH
+    RESULT=$?
+fi
+
+wacom_power_off
+
+if [ $RESULT -eq 0 ]; then
+    log -p i -t "${TAG}" "Firmware upgraded success"
+    setprop vendor.wac.update_complete 1
+else
+    log -p e -t "${TAG}" "Firmware upgrade failed, Target firmare version: $FW_FILE_VERSION"
+    echo -n "${TAG}:UPGRADE FAILED" > /proc/bootprof
+    setprop vendor.wac.update_complete 0
+fi
+
+install_i2c_hid
+echo -n "${TAG}:DONE" > /proc/bootprof
+exit 0

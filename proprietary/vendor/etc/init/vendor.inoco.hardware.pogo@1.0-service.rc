@@ -1,0 +1,4 @@
+service pogo-1-0 /vendor/bin/hw/vendor.inoco.hardware.pogo@1.0-service
+    class hal
+    user root
+    group system
